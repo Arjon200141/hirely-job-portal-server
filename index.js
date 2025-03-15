@@ -1,10 +1,10 @@
 const express = require('express');
-const bcrypt = require('bcrypt');
 const app = express();
 const cors = require('cors');
 const port = process.env.PORT || 5000;
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config();
+const bcrypt = require('bcrypt');
 
 app.use(cors());
 app.use(express.json());
@@ -21,18 +21,39 @@ const client = new MongoClient(uri, {
 
 async function run() {
     try {
-        await client.connect();
+        // await client.connect();
         console.log("Connected to MongoDB!");
 
         const jobCollection = client.db('hirely-job-portal').collection('jobs');
         const courseCollection = client.db('hirely-job-portal').collection('courses');
         const companyCollection = client.db('hirely-job-portal').collection('companies');
         const userCollection = client.db('hirely-job-portal').collection('users');
+        const coursecategoryCollection = client.db('hirely-job-portal').collection('course-category');
+        const appliedCollection = client.db('hirely-job-portal').collection('applied');
 
         // Get all jobs
         app.get('/jobs', async (req, res) => {
             try {
                 const result = await jobCollection.find().toArray();
+                res.send(result);
+            } catch (error) {
+                console.error("Error fetching jobs:", error);
+                res.status(500).send("Internal Server Error");
+            }
+        });
+        app.get('/users', async (req, res) => {
+            try {
+                const result = await userCollection.find().toArray();
+                res.send(result);
+            } catch (error) {
+                console.error("Error fetching jobs:", error);
+                res.status(500).send("Internal Server Error");
+            }
+        });
+
+        app.get('/course-category', async (req, res) => {
+            try {
+                const result = await coursecategoryCollection.find().toArray();
                 res.send(result);
             } catch (error) {
                 console.error("Error fetching jobs:", error);
@@ -49,6 +70,52 @@ async function run() {
                 res.status(500).send("Internal Server Error");
             }
         });
+        app.get('/applied', async (req, res) => {
+            try {
+                const result = await appliedCollection.find().toArray();
+                res.send(result);
+            } catch (error) {
+                console.error("Error fetching jobs:", error);
+                res.status(500).send("Internal Server Error");
+            }
+        });
+
+        app.delete('/applied/:id', async (req, res) => {
+            try {
+                const id = req.params.id;
+                const query = { _id: new ObjectId(id) };
+                const result = await appliedCollection.deleteOne(query);
+                res.send(result);
+            } catch (error) {
+                res.status(500).send({ message: 'Internal Server Error' });
+            }
+        });
+        
+        app.post('/applied', async (req, res) => {
+            try {
+                const cartItem = req.body;
+                const result = await appliedCollection.insertOne(cartItem);
+                res.send(result);
+            } catch (error) {
+                res.status(500).send({ message: 'Internal Server Error' });
+            }
+        });
+
+        app.patch("/applied/:id", async (req, res) => {
+            const { id } = req.params;
+            const { status } = req.body;
+            const result = await appliedCollection.updateOne(
+                { applyId: id }, 
+                { $set: { status: status } }
+            );
+        
+            if (result.modifiedCount > 0) {
+                res.json({ status });
+            } else {
+                res.status(400).json({ message: "Update failed" });
+            }
+        });
+        
 
         // Get a single job by ID
         app.get('/jobs/:id', async (req, res) => {
@@ -100,18 +167,18 @@ async function run() {
             try {
                 const { category } = req.query; // Extract the category from query parameters
                 let query = {}; // Initialize an empty query object
-        
+
                 // If a category is provided, filter by category
                 if (category) {
                     query.category = category.toUpperCase(); // Ensure the category is in uppercase
                 }
-        
+
                 // Fetch courses based on the query and sort by learners in descending order
                 const result = await courseCollection
                     .find(query)
                     .sort({ learners: -1 }) // Sort by learners in descending order
                     .toArray();
-        
+
                 res.send(result); // Send the response
             } catch (error) {
                 console.error("Error fetching courses:", error);
@@ -120,15 +187,15 @@ async function run() {
         });
         app.get("/courses/:id", async (req, res) => {
             const id = req.params.id;
-      
+
             // console.log('cookies : ',req.cookies);
             const query = { _id: new ObjectId(id) };
             const course = await courseCollection.findOne(query);
             res.send(course)
-          })
+        })
 
-          app.post('/api/register', async (req, res) => {
-            const { name, phoneNumber, email, password,userRoll } = req.body;
+        app.post('/register', async (req, res) => {
+            const { name, phoneNumber, email, password, userRoll } = req.body;
 
             // Validate input data
             if (!name || !phoneNumber || !email || !password) {
@@ -160,31 +227,31 @@ async function run() {
                 userId: result.insertedId,
             });
         });
-        app.post('/api/login', async (req, res) => {
+        app.post('/login', async (req, res) => {
             const { email, phoneNumber, password } = req.body;
-        
+
             // Validate input data
             if ((!email && !phoneNumber) || !password) {
                 return res.status(400).json({ message: 'Email/phone number and password are required.' });
             }
-        
+
             try {
                 // Find the user by email or phone number
                 const user = await userCollection.findOne({
                     $or: [{ email }, { phoneNumber }],
                 });
-        
+
                 if (!user) {
                     return res.status(404).json({ message: 'User not found.' });
                 }
-        
+
                 // Compare the provided password with the stored hashed password
                 const isPasswordValid = await bcrypt.compare(password, user.password);
-        
+
                 if (!isPasswordValid) {
                     return res.status(401).json({ message: 'Invalid password.' });
                 }
-        
+
                 // If everything is valid, return a success response
                 console.log(user);
                 res.status(200).json({
@@ -201,9 +268,6 @@ async function run() {
                 res.status(500).json({ message: 'An error occurred during login.' });
             }
         });
-        
-  
-
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
     } catch (error) {
         console.error("Error connecting to MongoDB:", error);
