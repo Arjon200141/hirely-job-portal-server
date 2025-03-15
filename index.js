@@ -4,6 +4,7 @@ const cors = require('cors');
 const port = process.env.PORT || 5000;
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config();
+const bcrypt = require('bcrypt');
 
 app.use(cors());
 app.use(express.json());
@@ -28,11 +29,21 @@ async function run() {
         const companyCollection = client.db('hirely-job-portal').collection('companies');
         const userCollection = client.db('hirely-job-portal').collection('users');
         const coursecategoryCollection = client.db('hirely-job-portal').collection('course-category');
+        const appliedCollection = client.db('hirely-job-portal').collection('applied');
 
         // Get all jobs
         app.get('/jobs', async (req, res) => {
             try {
                 const result = await jobCollection.find().toArray();
+                res.send(result);
+            } catch (error) {
+                console.error("Error fetching jobs:", error);
+                res.status(500).send("Internal Server Error");
+            }
+        });
+        app.get('/users', async (req, res) => {
+            try {
+                const result = await userCollection.find().toArray();
                 res.send(result);
             } catch (error) {
                 console.error("Error fetching jobs:", error);
@@ -59,6 +70,52 @@ async function run() {
                 res.status(500).send("Internal Server Error");
             }
         });
+        app.get('/applied', async (req, res) => {
+            try {
+                const result = await appliedCollection.find().toArray();
+                res.send(result);
+            } catch (error) {
+                console.error("Error fetching jobs:", error);
+                res.status(500).send("Internal Server Error");
+            }
+        });
+
+        app.delete('/applied/:id', async (req, res) => {
+            try {
+                const id = req.params.id;
+                const query = { _id: new ObjectId(id) };
+                const result = await appliedCollection.deleteOne(query);
+                res.send(result);
+            } catch (error) {
+                res.status(500).send({ message: 'Internal Server Error' });
+            }
+        });
+        
+        app.post('/applied', async (req, res) => {
+            try {
+                const cartItem = req.body;
+                const result = await appliedCollection.insertOne(cartItem);
+                res.send(result);
+            } catch (error) {
+                res.status(500).send({ message: 'Internal Server Error' });
+            }
+        });
+
+        app.patch("/applied/:id", async (req, res) => {
+            const { id } = req.params;
+            const { status } = req.body;
+            const result = await appliedCollection.updateOne(
+                { applyId: id }, 
+                { $set: { status: status } }
+            );
+        
+            if (result.modifiedCount > 0) {
+                res.json({ status });
+            } else {
+                res.status(400).json({ message: "Update failed" });
+            }
+        });
+        
 
         // Get a single job by ID
         app.get('/jobs/:id', async (req, res) => {
@@ -137,6 +194,80 @@ async function run() {
             res.send(course)
         })
 
+        app.post('/register', async (req, res) => {
+            const { name, phoneNumber, email, password, userRoll } = req.body;
+
+            // Validate input data
+            if (!name || !phoneNumber || !email || !password) {
+                return res.status(400).json({ message: 'All fields are required.' });
+            }
+
+            // Check if the email already exists
+            const existingUser = await userCollection.findOne({ email });
+            if (existingUser) {
+                return res.status(400).json({ message: 'Email already exists.' });
+            }
+
+            // Create user object (password is already hashed in the frontend)
+            const user = {
+                name,
+                phoneNumber,
+                email,
+                password,
+                userRoll, // Use the already hashed password from the frontend
+                createdAt: new Date(),
+            };
+
+            // Insert user into the database
+            const result = await userCollection.insertOne(user);
+
+            // Send response
+            res.status(201).json({
+                message: 'User registered successfully!',
+                userId: result.insertedId,
+            });
+        });
+        app.post('/login', async (req, res) => {
+            const { email, phoneNumber, password } = req.body;
+
+            // Validate input data
+            if ((!email && !phoneNumber) || !password) {
+                return res.status(400).json({ message: 'Email/phone number and password are required.' });
+            }
+
+            try {
+                // Find the user by email or phone number
+                const user = await userCollection.findOne({
+                    $or: [{ email }, { phoneNumber }],
+                });
+
+                if (!user) {
+                    return res.status(404).json({ message: 'User not found.' });
+                }
+
+                // Compare the provided password with the stored hashed password
+                const isPasswordValid = await bcrypt.compare(password, user.password);
+
+                if (!isPasswordValid) {
+                    return res.status(401).json({ message: 'Invalid password.' });
+                }
+
+                // If everything is valid, return a success response
+                console.log(user);
+                res.status(200).json({
+                    message: 'Login successful!',
+                    user: {
+                        name: user.name,
+                        email: user.email,
+                        phoneNumber: user.phoneNumber,
+                        userRoll: user.userRoll,
+                    },
+                });
+            } catch (error) {
+                console.error('Error during login:', error);
+                res.status(500).json({ message: 'An error occurred during login.' });
+            }
+        });
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
     } catch (error) {
         console.error("Error connecting to MongoDB:", error);
