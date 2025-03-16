@@ -1,10 +1,10 @@
 const express = require('express');
-const bcrypt = require('bcrypt');
 const app = express();
 const cors = require('cors');
 const port = process.env.PORT || 5000;
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config();
+const bcrypt = require('bcrypt');
 
 app.use(cors());
 app.use(express.json());
@@ -21,15 +21,26 @@ const client = new MongoClient(uri, {
 
 async function run() {
     try {
-        await client.connect();
+        // await client.connect();
         console.log("Connected to MongoDB!");
 
         const jobCollection = client.db('hirely-job-portal').collection('jobs');
         const courseCollection = client.db('hirely-job-portal').collection('courses');
         const companyCollection = client.db('hirely-job-portal').collection('companies');
         const userCollection = client.db('hirely-job-portal').collection('users');
+        const coursecategoryCollection = client.db('hirely-job-portal').collection('course-category');
+        const appliedCollection = client.db('hirely-job-portal').collection('applied');
 
-
+        // Get all jobs
+        app.get('/jobs', async (req, res) => {
+            try {
+                const result = await jobCollection.find().toArray();
+                res.send(result);
+            } catch (error) {
+                console.error("Error fetching jobs:", error);
+                res.status(500).send("Internal Server Error");
+            }
+        });
         app.post('/update-user-details', async (req, res) => {
             const { email, dataType, data } = req.body; // Extract email, dataType, and data from request body
         
@@ -85,10 +96,9 @@ async function run() {
             }
         });
 
-        // Get all jobs
-        app.get('/jobs', async (req, res) => {
+        app.get('/course-category', async (req, res) => {
             try {
-                const result = await jobCollection.find().toArray();
+                const result = await coursecategoryCollection.find().toArray();
                 res.send(result);
             } catch (error) {
                 console.error("Error fetching jobs:", error);
@@ -105,6 +115,52 @@ async function run() {
                 res.status(500).send("Internal Server Error");
             }
         });
+        app.get('/applied', async (req, res) => {
+            try {
+                const result = await appliedCollection.find().toArray();
+                res.send(result);
+            } catch (error) {
+                console.error("Error fetching jobs:", error);
+                res.status(500).send("Internal Server Error");
+            }
+        });
+
+        app.delete('/applied/:id', async (req, res) => {
+            try {
+                const id = req.params.id;
+                const query = { _id: new ObjectId(id) };
+                const result = await appliedCollection.deleteOne(query);
+                res.send(result);
+            } catch (error) {
+                res.status(500).send({ message: 'Internal Server Error' });
+            }
+        });
+        
+        app.post('/applied', async (req, res) => {
+            try {
+                const cartItem = req.body;
+                const result = await appliedCollection.insertOne(cartItem);
+                res.send(result);
+            } catch (error) {
+                res.status(500).send({ message: 'Internal Server Error' });
+            }
+        });
+
+        app.patch("/applied/:id", async (req, res) => {
+            const { id } = req.params;
+            const { status } = req.body;
+            const result = await appliedCollection.updateOne(
+                { applyId: id }, 
+                { $set: { status: status } }
+            );
+        
+            if (result.modifiedCount > 0) {
+                res.json({ status });
+            } else {
+                res.status(400).json({ message: "Update failed" });
+            }
+        });
+        
 
         // Get a single job by ID
         app.get('/jobs/:id', async (req, res) => {
@@ -257,12 +313,6 @@ async function run() {
                 res.status(500).json({ message: 'An error occurred during login.' });
             }
         });
-
-
-
-
-
-
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
     } catch (error) {
         console.error("Error connecting to MongoDB:", error);
