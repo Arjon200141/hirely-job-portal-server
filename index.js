@@ -1,10 +1,10 @@
 const express = require('express');
+const bcrypt = require('bcrypt');
 const app = express();
 const cors = require('cors');
 const port = process.env.PORT || 5000;
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config();
-const bcrypt = require('bcrypt');
 
 app.use(cors());
 app.use(express.json());
@@ -21,24 +21,58 @@ const client = new MongoClient(uri, {
 
 async function run() {
     try {
-        // await client.connect();
+        await client.connect();
         console.log("Connected to MongoDB!");
 
         const jobCollection = client.db('hirely-job-portal').collection('jobs');
         const courseCollection = client.db('hirely-job-portal').collection('courses');
         const companyCollection = client.db('hirely-job-portal').collection('companies');
         const userCollection = client.db('hirely-job-portal').collection('users');
-        const coursecategoryCollection = client.db('hirely-job-portal').collection('course-category');
-        const appliedCollection = client.db('hirely-job-portal').collection('applied');
 
-        // Get all jobs
-        app.get('/jobs', async (req, res) => {
+
+        app.post('/update-user-details', async (req, res) => {
+            const { email, dataType, data } = req.body; // Extract email, dataType, and data from request body
+        
+            // Validate input
+            if (!email || !dataType || !data) {
+                return res.status(400).json({ message: 'Email, dataType, and data are required' });
+            }
+        
             try {
-                const result = await jobCollection.find().toArray();
-                res.send(result);
+                // Find the user by email
+                const user = await userCollection.findOne({ email });
+        
+                if (!user) {
+                    return res.status(404).json({ message: 'User not found' });
+                }
+        
+                let updateQuery = {};
+        
+                if (dataType === 'WorkExp' || dataType === 'KeySkills') {
+                    // Handle WorkExp and KeySkills differently: Append to the existing array
+                    const existingData = user.UserDescription?.[dataType] || []; // Get existing data or initialize as empty array
+                    const updatedData = [...existingData, data]; // Append the new data
+        
+                    updateQuery[`UserDescription.${dataType}`] = updatedData; // Update the array
+                } else {
+                    // For other data types, overwrite the existing data
+                    updateQuery[`UserDescription.${dataType}`] = data;
+                }
+        
+                // Update the user document
+                const result = await userCollection.updateOne(
+                    { email }, // Filter by email
+                    { $set: updateQuery } // Update operation
+                );
+        
+                if (result.modifiedCount === 1) {
+                    res.status(200).json({ message: `User ${dataType} updated successfully` });
+                } else {
+                    res.status(500).json({ message: `Failed to update user ${dataType}` });
+                }
             } catch (error) {
-                console.error("Error fetching jobs:", error);
-                res.status(500).send("Internal Server Error");
+                console.error(`Error updating user ${dataType}:`, error);
+                res.status(500).json({ message: 'Internal server error' });
             }
         });
         app.get('/users', async (req, res) => {
@@ -51,9 +85,10 @@ async function run() {
             }
         });
 
-        app.get('/course-category', async (req, res) => {
+        // Get all jobs
+        app.get('/jobs', async (req, res) => {
             try {
-                const result = await coursecategoryCollection.find().toArray();
+                const result = await jobCollection.find().toArray();
                 res.send(result);
             } catch (error) {
                 console.error("Error fetching jobs:", error);
@@ -70,52 +105,6 @@ async function run() {
                 res.status(500).send("Internal Server Error");
             }
         });
-        app.get('/applied', async (req, res) => {
-            try {
-                const result = await appliedCollection.find().toArray();
-                res.send(result);
-            } catch (error) {
-                console.error("Error fetching jobs:", error);
-                res.status(500).send("Internal Server Error");
-            }
-        });
-
-        app.delete('/applied/:id', async (req, res) => {
-            try {
-                const id = req.params.id;
-                const query = { _id: new ObjectId(id) };
-                const result = await appliedCollection.deleteOne(query);
-                res.send(result);
-            } catch (error) {
-                res.status(500).send({ message: 'Internal Server Error' });
-            }
-        });
-        
-        app.post('/applied', async (req, res) => {
-            try {
-                const cartItem = req.body;
-                const result = await appliedCollection.insertOne(cartItem);
-                res.send(result);
-            } catch (error) {
-                res.status(500).send({ message: 'Internal Server Error' });
-            }
-        });
-
-        app.patch("/applied/:id", async (req, res) => {
-            const { id } = req.params;
-            const { status } = req.body;
-            const result = await appliedCollection.updateOne(
-                { applyId: id }, 
-                { $set: { status: status } }
-            );
-        
-            if (result.modifiedCount > 0) {
-                res.json({ status });
-            } else {
-                res.status(400).json({ message: "Update failed" });
-            }
-        });
-        
 
         // Get a single job by ID
         app.get('/jobs/:id', async (req, res) => {
@@ -268,6 +257,12 @@ async function run() {
                 res.status(500).json({ message: 'An error occurred during login.' });
             }
         });
+
+
+
+
+
+
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
     } catch (error) {
         console.error("Error connecting to MongoDB:", error);
