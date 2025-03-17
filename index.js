@@ -43,39 +43,39 @@ async function run() {
         });
         app.post('/update-user-details', async (req, res) => {
             const { email, dataType, data } = req.body; // Extract email, dataType, and data from request body
-        
+
             // Validate input
             if (!email || !dataType || !data) {
                 return res.status(400).json({ message: 'Email, dataType, and data are required' });
             }
-        
+
             try {
                 // Find the user by email
                 const user = await userCollection.findOne({ email });
-        
+
                 if (!user) {
                     return res.status(404).json({ message: 'User not found' });
                 }
-        
+
                 let updateQuery = {};
-        
+
                 if (dataType === 'WorkExp' || dataType === 'KeySkills') {
                     // Handle WorkExp and KeySkills differently: Append to the existing array
                     const existingData = user.UserDescription?.[dataType] || []; // Get existing data or initialize as empty array
                     const updatedData = [...existingData, data]; // Append the new data
-        
+
                     updateQuery[`UserDescription.${dataType}`] = updatedData; // Update the array
                 } else {
                     // For other data types, overwrite the existing data
                     updateQuery[`UserDescription.${dataType}`] = data;
                 }
-        
+
                 // Update the user document
                 const result = await userCollection.updateOne(
                     { email }, // Filter by email
                     { $set: updateQuery } // Update operation
                 );
-        
+
                 if (result.modifiedCount === 1) {
                     res.status(200).json({ message: `User ${dataType} updated successfully` });
                 } else {
@@ -106,6 +106,7 @@ async function run() {
             }
         });
 
+
         app.get('/companies', async (req, res) => {
             try {
                 const result = await companyCollection.find().toArray();
@@ -115,6 +116,123 @@ async function run() {
                 res.status(500).send("Internal Server Error");
             }
         });
+        app.post('/followcompany', async (req, res) => {
+            const { email, companyId } = req.body; // Extract email and companyId from the request body
+
+            // Validate input
+            if (!email || !companyId) {
+                return res.status(400).json({ message: 'Email and companyId are required' });
+            }
+
+            try {
+                // Find the company by companyId
+                const company = await companyCollection.findOne({ _id: new ObjectId(companyId) });
+                if (!company) {
+                    return res.status(404).json({ message: 'Company not found' });
+                }
+
+                // Add the user's email to the company's followers array
+                await companyCollection.updateOne(
+                    { _id: new ObjectId(companyId) },
+                    { $addToSet: { followers: email } } // Use $addToSet to avoid duplicates
+                );
+
+                // Find the user by email
+                const user = await userCollection.findOne({ email });
+                if (!user) {
+                    return res.status(404).json({ message: 'User not found' });
+                }
+
+                // Add the companyId to the user's followedCompanies array
+                await userCollection.updateOne(
+                    { email },
+                    { $addToSet: { followedCompanies: companyId } } // Use $addToSet to avoid duplicates
+                );
+
+                res.status(200).json({ message: 'Company followed successfully' });
+            } catch (error) {
+                console.error('Error following company:', error);
+                res.status(500).json({ message: 'Internal server error' });
+            }
+        });
+        app.get('/companyfollowedbyuser/:email', async (req, res) => {
+            const email = req.params.email; // Extract email from the route parameter
+
+            // Validate input
+            if (!email) {
+                return res.status(400).json({ message: 'Email is required' });
+            }
+
+            try {
+                // Find the user by email
+                const user = await userCollection.findOne({ email });
+                if (!user) {
+                    return res.status(404).json({ message: 'User not found' });
+                }
+
+                // Get the followedCompanies array from the user object
+                const followedCompanies = user.followedCompanies || [];
+
+                // If the user is not following any companies, return an empty array
+                if (followedCompanies.length === 0) {
+                    return res.status(200).json([]);
+                }
+
+                // Convert company IDs to ObjectId
+                const companyIds = followedCompanies.map(id => new ObjectId(id));
+
+                // Find the companies using the company IDs
+                const companies = await companyCollection.find({
+                    _id: { $in: companyIds }
+                }).toArray();
+
+                // Send the list of companies to the frontend
+                res.status(200).json(companies);
+            } catch (error) {
+                console.error('Error fetching followed companies:', error);
+                res.status(500).json({ message: 'Internal server error' });
+            }
+        });
+        app.post('/unfollowcompany', async (req, res) => {
+            const { email, companyId } = req.body; // Extract email and companyId from the request body
+
+            // Validate input
+            if (!email || !companyId) {
+                return res.status(400).json({ message: 'Email and companyId are required' });
+            }
+
+            try {
+                // Find the company by companyId
+                const company = await companyCollection.findOne({ _id: new ObjectId(companyId) });
+                if (!company) {
+                    return res.status(404).json({ message: 'Company not found' });
+                }
+
+                // Remove the user's email from the company's followers array
+                await companyCollection.updateOne(
+                    { _id: new ObjectId(companyId) },
+                    { $pull: { followers: email } } // Use $pull to remove the email
+                );
+
+                // Find the user by email
+                const user = await userCollection.findOne({ email });
+                if (!user) {
+                    return res.status(404).json({ message: 'User not found' });
+                }
+
+                // Remove the companyId from the user's followedCompanies array
+                await userCollection.updateOne(
+                    { email },
+                    { $pull: { followedCompanies: companyId } } // Use $pull to remove the companyId
+                );
+
+                res.status(200).json({ message: 'Company unfollowed successfully' });
+            } catch (error) {
+                console.error('Error unfollowing company:', error);
+                res.status(500).json({ message: 'Internal server error' });
+            }
+        });
+
         app.get('/applied', async (req, res) => {
             try {
                 const result = await appliedCollection.find().toArray();
@@ -135,7 +253,7 @@ async function run() {
                 res.status(500).send({ message: 'Internal Server Error' });
             }
         });
-        
+
         app.post('/applied', async (req, res) => {
             try {
                 const cartItem = req.body;
@@ -150,17 +268,17 @@ async function run() {
             const { id } = req.params;
             const { status } = req.body;
             const result = await appliedCollection.updateOne(
-                { applyId: id }, 
+                { applyId: id },
                 { $set: { status: status } }
             );
-        
+
             if (result.modifiedCount > 0) {
                 res.json({ status });
             } else {
                 res.status(400).json({ message: "Update failed" });
             }
         });
-        
+
 
         // Get a single job by ID
         app.get('/jobs/:id', async (req, res) => {
