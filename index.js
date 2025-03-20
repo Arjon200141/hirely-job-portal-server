@@ -52,6 +52,8 @@ async function run() {
             }
         });
 
+
+
         app.post('/followcompany', async (req, res) => {
             const { email, companyId } = req.body; // Extract email and companyId from the request body
 
@@ -249,6 +251,18 @@ async function run() {
             }
         });
 
+        app.delete('/users/:id', async (req, res) => {
+            try {
+                const { applyId } = req.params;
+                const { email } = req.query; // Pass email as a query parameter
+                const query = { applyId, email };
+                const result = await userCollection.deleteOne(query);
+                res.send(result);
+            } catch (error) {
+                res.status(500).send({ message: 'Internal Server Error' });
+            }
+        });
+
 
         app.get('/course-category', async (req, res) => {
             try {
@@ -408,6 +422,7 @@ async function run() {
                 res.status(400).json({ message: "Update failed" });
             }
         });
+        
 
 
         // Get a single job by ID
