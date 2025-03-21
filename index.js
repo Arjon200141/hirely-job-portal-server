@@ -5,6 +5,8 @@ const port = process.env.PORT || 5000;
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config();
 const bcrypt = require('bcrypt');
+const axios = require('axios');
+
 
 app.use(cors());
 app.use(express.json());
@@ -31,6 +33,82 @@ async function run() {
         const coursecategoryCollection = client.db('hirely-job-portal').collection('course-category');
         const appliedCollection = client.db('hirely-job-portal').collection('applied');
         const savedCollection = client.db('hirely-job-portal').collection('saved');
+        const cvCollection = client.db('hirely-job-portal').collection('cv');
+        const chatCollection = client.db('hirely-job-portal').collection('chat');
+        const paymentCollection = client.db('Book-vibe').collection('payments');
+
+        const multer = require('multer');
+
+
+        const upload = multer({
+            storage: multer.memoryStorage(),
+            limits: { fileSize: 5 * 1024 * 1024 },
+            fileFilter: (req, file, cb) => {
+                if (file.mimetype !== 'application/pdf') {
+                    return cb(new Error('Only PDF files are allowed!'), false);
+                }
+                cb(null, true);
+            }
+        });
+
+        app.post('/upload-cv', upload.single('cv'), async (req, res) => {
+            try {
+                const { email } = req.body;
+                const cvFile = req.file;
+
+                if (!email) {
+                    return res.status(400).json({ message: 'Email is required!' });
+                }
+                if (!cvFile) {
+                    return res.status(400).json({ message: 'No file uploaded.' });
+                }
+
+                const cvData = {
+                    email,
+                    cvFile: {
+                        data: cvFile.buffer,
+                        contentType: cvFile.mimetype,
+                    },
+                    originalName: cvFile.originalname,
+                    uploadedAt: new Date(),
+                };
+
+                await cvCollection.updateOne(
+                    { email },
+                    { $set: cvData },
+                    { upsert: true }
+                );
+
+                res.status(200).json({ message: 'CV uploaded successfully!' });
+            } catch (error) {
+                console.error('Error uploading CV:', error);
+                res.status(500).json({ message: 'Internal server error.' });
+            }
+        });
+
+        app.get('/get-cv/:email', async (req, res) => {
+            try {
+                const { email } = req.params;
+                if (!email) {
+                    return res.status(400).json({ message: 'Email is required!' });
+                }
+
+                const cv = await cvCollection.findOne({ email });
+
+                if (!cv || !cv.cvFile) {
+                    return res.status(404).json({ message: 'No CV found for this user.' });
+                }
+
+                res.setHeader('Content-Type', cv.cvFile.contentType);
+                res.setHeader('Content-Disposition', `inline; filename="${cv.originalName}"`);
+
+                res.send(cv.cvFile.data);
+            } catch (error) {
+                console.error('Error fetching CV:', error);
+                res.status(500).json({ message: 'Internal server error.' });
+            }
+        });
+
 
         // Get all jobs
         app.get('/jobs', async (req, res) => {
@@ -427,7 +505,7 @@ async function run() {
                                 companyName: company.Company_Name,
                                 jobId: jobId,
                                 timestamp: new Date(),
-                                notificationread:false
+                                notificationread: false
                             };
 
                             // Add the notification to the user's notification array
@@ -509,7 +587,7 @@ async function run() {
                 res.status(400).json({ message: "Update failed" });
             }
         });
-        
+
 
 
         // Get a single job by ID
@@ -791,8 +869,8 @@ async function run() {
                             phoneNumber: user.phoneNumber,
                             userRoll: user.userRoll,
                             OTPverified: true,
-                            UserDescription:user.UserDescription,
-                            notifications:user.notifications
+                            UserDescription: user.UserDescription,
+                            notifications: user.notifications
                         },
                     });
                 } else {
@@ -824,6 +902,161 @@ async function run() {
             }
         });
 
+
+        app.get('/payments', async (req, res) => {
+            const result = await paymentCollection.find().toArray();
+            res.send(result);
+        });
+
+        app.post('/create-payment', async (req, res) => {
+            const paymentInfo = req.body;
+            const trx_id = new ObjectId().toString();
+
+            const initiateData = {
+                store_id: "bookv6776cc873217c",
+                store_passwd: "bookv6776cc873217c@ssl",
+                total_amount: paymentInfo.amount,
+                currency: "BDT",
+                tran_id: trx_id,
+                success_url: "http://localhost:5000/success-payment",
+                fail_url: "http://localhost:5000/fail",
+                cancel_url: "http://localhost:5000/cancel",
+                cus_name: paymentInfo.customerName,
+                cus_email: paymentInfo.customerEmail,
+                cus_add1: "Dhaka",
+                cus_city: "Dhaka",
+                cus_country: "Bangladesh",
+                cus_phone: "01711111111",
+                cus_fax: "01711111111",
+                shipping_method: "NO",
+                product_name: "Books",
+                product_category: "General",
+                product_profile: "general",
+                multi_card_name: "mastercard, visacard, amexcard",
+                value_a: "ref001_A",
+                value_b: "ref002_B",
+                value_c: "ref003_C",
+                value_d: "ref004_D",
+            };
+
+            try {
+                const sslResponse = await fetch("https://sandbox.sslcommerz.com/gwprocess/v4/api.php", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded",
+                    },
+                    body: new URLSearchParams(initiateData).toString(),
+                });
+
+                if (!sslResponse.ok) {
+                    throw new Error(`SSLCommerz API error: ${sslResponse.statusText}`);
+                }
+
+                const sslData = await sslResponse.json();
+
+                const saveData = {
+                    customerName: initiateData.cus_name,
+                    customerEmail: initiateData.cus_email,
+                    paymentId: trx_id,
+                    amount: paymentInfo.amount,
+                    status: "Pending",
+                };
+
+                await paymentCollection.insertOne(saveData);
+
+                if (sslData.GatewayPageURL) {
+                    res.send({
+                        paymentUrl: sslData.GatewayPageURL,
+                    });
+                } else {
+                    throw new Error("No GatewayPageURL received from SSLCommerz");
+                }
+            } catch (error) {
+                console.error("Error in /create-payment:", error);
+                res.status(500).send({ error: "Failed to initiate payment" });
+            }
+        });
+
+        app.post("/success-payment", async (req, res) => {
+            const successData = req.body;
+        
+            // Log the entire successData for debugging
+            console.log("Success Data from SSLCommerz:", successData);
+        
+            // Check if the status is VALID
+            if (successData.status !== 'VALID') {
+                console.error("Invalid payment status:", successData.status);
+                return res.status(400).json({ error: "Unauthorized Payment, Invalid Payment Status" });
+            }
+        
+            try {
+                const query = {
+                    paymentId: successData.tran_id,
+                };
+        
+                const update = {
+                    $set: {
+                        status: "Success",
+                    },
+                };
+        
+                // Update the payment status in the database
+                const updateResult = await paymentCollection.updateOne(query, update);
+        
+                if (updateResult.modifiedCount === 0) {
+                    console.error("No payment record found for transaction ID:", successData.tran_id);
+                    return res.status(404).json({ error: "Payment record not found" });
+                }
+        
+                // Redirect to the frontend success page
+                res.redirect("http://localhost:5173/success");
+            } catch (error) {
+                console.error("Error in /success-payment:", error);
+                res.status(500).json({ error: "Internal Server Error" });
+            }
+        });
+
+        app.post("/fail", async (req, res) => {
+            const failData = req.body;
+            console.log("Payment Failed. Data from SSLCommerz:", failData);
+        
+            // Update the payment status in the database to "Failed"
+            const query = {
+                paymentId: failData.tran_id,
+            };
+        
+            const update = {
+                $set: {
+                    status: "Failed",
+                },
+            };
+        
+            await paymentCollection.updateOne(query, update);
+        
+            // Redirect to the frontend fail page
+            res.redirect("http://localhost:5173/fail");
+        });
+        
+        app.post("/cancel", async (req, res) => {
+            const cancelData = req.body;
+            console.log("Payment Cancelled. Data from SSLCommerz:", cancelData);
+        
+            // Update the payment status in the database to "Cancelled"
+            const query = {
+                paymentId: cancelData.tran_id,
+            };
+        
+            const update = {
+                $set: {
+                    status: "Cancelled",
+                },
+            };
+        
+            await paymentCollection.updateOne(query, update);
+        
+            // Redirect to the frontend cancel page
+            res.redirect("http://localhost:5173/cancel");
+        });
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
     } catch (error) {
         console.error("Error connecting to MongoDB:", error);
